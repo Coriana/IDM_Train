@@ -111,9 +111,9 @@ This script will train an IDM to label unlabeled videos for ML training
 # LEARNING_RATE=0.000181
 LEARNING_RATE = 0.001586
 # WEIGHT_DECAY=0.039428
-WEIGHT_DECAY = 0.044506
+WEIGHT_DECAY = 0.01
 MAX_GRAD_NORM = 5.0
-BACKUP = 100
+BACKUP = 500
 
 # Matches a number in the MineRL Java code regarding sensitivity
 # This is for mapping from recorded sensitivity to the one used in the model
@@ -193,6 +193,10 @@ def main(model, weights, video_path, n_frames, accumulation, out_weights, device
     loss_func = th.nn.CrossEntropyLoss()
     batch = 0
     
+    tmp_path = out_weights[:-8]
+    log_path = tmp_path + ".log"
+    log = open(log_path, 'a') # make .jsonl file and open for writing
+
 
     while True:
         batch_loss = 0
@@ -231,8 +235,8 @@ def main(model, weights, video_path, n_frames, accumulation, out_weights, device
                 #log_prob  = policy.get_logprob_of_action(pi_distribution, agent_action)
                 #buttons_loss = loss_func(pi_buttons, buttons.to(device))
                 #camera_loss = loss_func(pi_camera, camera.to(device))
-                buttons_loss = loss_func(pi_buttons.reshape(16*20,2),buttons.to(device).reshape(16*20))*16
-                camera_loss = loss_func(pi_camera.reshape(16*2,11),camera.to(device).reshape(16*2))*2
+                buttons_loss = loss_func(pi_buttons.reshape(n_frames*20,2),buttons.to(device).reshape(n_frames*20))
+                camera_loss = loss_func(pi_camera.reshape(n_frames*2,11),camera.to(device).reshape(n_frames*2))
                 loss = camera_loss + buttons_loss
             except:
                 print("ERROR 3")
@@ -255,20 +259,24 @@ def main(model, weights, video_path, n_frames, accumulation, out_weights, device
          #   print("Step:",step,end=" - ")
             batch_loss += loss.item()
 
-          #  print("Total loss",loss.item())
+            print("Total loss",loss.item())
             loss.backward()
             agent.reset()
             #th.nn.utils.clip_grad_norm_(trainable_parameters, MAX_GRAD_NORM) #Applies gradient clipping
         #if (step+1) % accumulation == 0:
-        print("Optimizer step: "+ str(batch) + ", Batch loss = " + str(batch_loss/accumulation))
+        logoutput = f"Optimizer step: {str(batch)}, Total loss: {str(batch_loss)}, Avrg loss: {str(batch_loss/accumulation)}"
+        log.write(logoutput + '\n') # write to file
+        print(logoutput)
+
         optimizer.step()
         optimizer.zero_grad()
         batch=batch+1            
         if batch % BACKUP == 0:
             state_dict = agent.policy.state_dict()
             th.save(state_dict, out_weights)
-            print("Model backed up")
-
+            logoutput = "Model backed up"
+            log.write(logoutput + '\n') # write to file
+            print(logoutput)
     
     if out_weights:
         state_dict = agent.policy.state_dict()
@@ -407,7 +415,7 @@ class Data_Loader():
                 except:
                     print("Failed: " + video_tuple[1])
                     continue
-            rnd = random.randrange(14)
+            rnd = random.randrange(63)
             # print(str(rnd))
             for _ in range(rnd):
                 ret, frame = cap.read()
@@ -482,7 +490,7 @@ if __name__ == "__main__":
     parser.add_argument("--video-path", type=str, required=True, help="Path to a folder of demonstrations")
     parser.add_argument("--n-frames", type=int, default=16, help="Number of frames to process at a time.")
     parser.add_argument("--n_epochs", type=int, default=5, help="Number of epochs to run for.")
-    parser.add_argument("--batch-accumulaton", type=int, default=1024, help="Number of batches to process before optimizer step.")
+    parser.add_argument("--batch-accumulaton", type=int, default=128, help="Number of batches to process before optimizer step.")
     parser.add_argument("--out_weights",  default="", type=str,help="Name to save weights as")
     parser.add_argument("--device",  default="cuda", type=str,help="Specify either cpu or cuda")
     parser.add_argument("--n_workers",  default=128, type=int,help="Number of clips to train on in parallel")
