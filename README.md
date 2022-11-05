@@ -16,8 +16,14 @@ but, its also a test of whats required as when limiting the original IDM to 16 f
 
 Known Limitations: does not apply virtual cursor to videos.
 
-Original code by ViktorThink https://github.com/ViktorThink/Video-Pre-Training
-Tweaks by Corianas
+
+
+# Todo:
+
+Setup some form of verification, to take the training data, and run against known data, to give it a score.
+
+Verify it works. (and that I reshaped things properly)
+
 
 # Running Inverse Dynamics Model (IDM)
 
@@ -40,6 +46,8 @@ A window should pop up which shows the video frame-by-frame, showing the predict
 Note that `run_inverse_dynamics_model.py` is designed to be a demo of the IDM, not code to put it into practice.
 
 # Contribution
+Original IDM Training code by [ViktorThink](https://github.com/ViktorThink),
+The rest is based on the work by:
 This was a large effort by a dedicated team at OpenAI:
 [Bowen Baker](https://github.com/bowenbaker),
 [Ilge Akkaya](https://github.com/ilge),
