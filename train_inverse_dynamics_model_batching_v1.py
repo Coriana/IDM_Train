@@ -265,7 +265,7 @@ def main(model, weights, video_path, n_frames, accumulation, out_weights, device
             try:
                 buttons_loss = loss_func(pi_buttons.reshape(n_frames*20,2),buttons.to(device).reshape(n_frames*20))
                 camera_loss = loss_func(pi_camera.reshape(n_frames*2,11),camera.to(device).reshape(n_frames*2))
-                loss = (camera_loss + buttons_loss)*n_frames
+                loss = camera_loss + buttons_loss
             except:
                 print("ERROR 3")
                 print("pi_camera",pi_camera)
@@ -284,10 +284,10 @@ def main(model, weights, video_path, n_frames, accumulation, out_weights, device
                 print("pi_buttons",pi_buttons)
                 print("buttons",buttons)
                 print("buttons_loss",buttons_loss)
-         #   print("Step:",step,end=" - ")
-            batch_loss += loss.item()
+           # print("Step:",step,end=" - ")
+           # print("Total loss",loss.item())
 
-            # print("Total loss",loss.item())
+            batch_loss += loss.item()
             loss.backward()
             agent.reset()
             #th.nn.utils.clip_grad_norm_(trainable_parameters, MAX_GRAD_NORM) #Applies gradient clipping
@@ -450,7 +450,7 @@ class Data_Loader():
                 except:
                     print("Failed: " + video_tuple[1])
                     continue
-            rnd = random.randrange(63)
+            rnd = random.randrange(14)
             # print(str(rnd))
             for _ in range(rnd):
                 ret, frame = cap.read()

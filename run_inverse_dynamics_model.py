@@ -138,6 +138,7 @@ def main(model, weights, video_path, json_path, n_batches, n_frames):
     cap = cv2.VideoCapture(video_path)
 
     json_index = 0
+
     with open(json_path) as json_file:
         json_lines = json_file.readlines()
         json_data = "[" + ",".join(json_lines) + "]"
@@ -176,6 +177,7 @@ def main(model, weights, video_path, json_path, n_batches, n_frames):
             )
             for y, (action_name, action_array) in enumerate(predicted_actions.items()):
                 current_prediction = action_array[0, i]
+
                 cv2.putText(
                     frame,
                     f"{action_name}: {current_prediction} ({recorded_action[action_name]})",
@@ -197,7 +199,7 @@ if __name__ == "__main__":
     parser.add_argument("--model", type=str, required=True, help="Path to the '.model' file to be loaded.")
     parser.add_argument("--video-path", type=str, required=True, help="Path to a .mp4 file (Minecraft recording).")
     parser.add_argument("--jsonl-path", type=str, required=True, help="Path to a .jsonl file (Minecraft recording).")
-    parser.add_argument("--n-frames", type=int, default=128, help="Number of frames to process at a time.")
+    parser.add_argument("--n-frames", type=int, default=16, help="Number of frames to process at a time.")
     parser.add_argument("--n-batches", type=int, default=10, help="Number of batches (n-frames) to process for visualization.")
 
     args = parser.parse_args()
