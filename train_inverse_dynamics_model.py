@@ -103,6 +103,7 @@ camera_bins=[-10,
              ]
 
 
+
 MESSAGE = """
 This script will train an IDM to label unlabeled videos for ML training
 """
@@ -123,6 +124,8 @@ CURSOR_FILE = os.path.join(os.path.dirname(__file__), "cursors", "mouse_cursor_w
 # This is for mapping from recorded sensitivity to the one used in the model
 CAMERA_SCALER = 0.5 * 360.0 / 2400.0 # Needs calibration for sure
 
+BACKUP = 10000
+
 def composite_images_with_alpha(image1, image2, alpha, x, y):
     """
     Draw image2 over image1 at location x,y, using alpha as the opacity for image2.
@@ -138,16 +141,16 @@ def composite_images_with_alpha(image1, image2, alpha, x, y):
 
 
 
-agent_settings = {'version': 2525,
+agent_settings = {'version': 1361,
                   'model': {'args': {
-                      'net': {'args': {'attention_heads': 8, 
+                      'net': {'args': {'attention_heads': 16, 
                                        'attention_mask_style': 'none',
                                        'attention_memory_size': 16,
                                        'conv3d_params': {'inchan': 3, 'kernel_size': [5, 1, 1], 'outchan': 16, 'padding': [2, 0, 0]},
                                        'hidsize': 1024,
                                        'img_shape': [128, 128, 16],
                                        'impala_kwargs': {'post_pool_groups': 1},
-                                       'impala_width': 4,
+                                       'impala_width': 8,
                                        'init_norm_kwargs': {'batch_norm': False, 'group_norm_groups': 1},
                                        'n_recurrence_layers': 2,
                                        'only_img_input': True,
@@ -160,157 +163,12 @@ agent_settings = {'version': 2525,
                                        'use_pointwise_layer': True,
                                        'use_pre_lstm_ln': False},
                               'function': 'ypt.model.inverse_action_model:InverseActionNet',
-                              'local_args': {'hidsize': 128, 'impala_width': 1}},
+                              'local_args': {'hidsize': 16, 'impala_width': 1}},
                       'pi_head_opts': {'temperature': 1}},
                       'function': 'ypt.model.inverse_action_model:create'
                       },
 
                   }
-
-    
-    
-def main(model, weights, video_path, n_frames, accumulation, out_weights, device, n_workers, n_epochs,verbose=False):
-    print(MESSAGE)
-    if model == "":
-        agent_parameters = agent_settings
-    else:
-        agent_parameters = pickle.load(open(model, "rb"))
-    net_kwargs = agent_parameters["model"]["args"]["net"]["args"]
-    pi_head_kwargs = agent_parameters["model"]["args"]["pi_head_opts"]
-    pi_head_kwargs["temperature"] = float(pi_head_kwargs["temperature"])
-    agent = IDMAgent(idm_net_kwargs=net_kwargs, pi_head_kwargs=pi_head_kwargs,device = device)
-    #with open('CorianasIDM.model', 'wb') as f:
-    #    pickle.dump(agent_parameters, f)
-    #th.save(agent_parameters, out_weights + ".model")
-    if weights != "":
-        agent.load_weights(weights)
-        
-    print("video path",video_path)
-    demonstration_tuples = load_data_path(video_path, n_epochs)
-    print("Number of clips:",len(demonstration_tuples))
-    required_resolution = ENV_KWARGS["resolution"]
-
-    policy = agent.policy
-    
-        
-        
-
-    
-    trainable_parameters = agent.policy.parameters()
-    
-    optimizer = th.optim.Adam(
-    trainable_parameters,
-    lr=LEARNING_RATE,
-    weight_decay=WEIGHT_DECAY
-    )
-    
-    
-    data_loader = Data_Loader(demonstration_tuples,required_resolution=required_resolution, n_epochs=n_epochs, n_workers=n_workers, n_frames=n_frames)
-    
-    loss_func = th.nn.CrossEntropyLoss()
-    batch = 0
-    
-    tmp_path = out_weights[:-8]
-    log_path = tmp_path + ".log"
-    log = open(log_path, 'a') # make .jsonl file and open for writing
-
-
-    while True:
-        batch_loss = 0
-        for i in range(accumulation):
-            frames, recorded_actions, worker_num = data_loader.next()
-
-            if type(frames) == type(None):
-                break
-            th.cuda.empty_cache()
-            #agent_action = agent._video_action_to_agent(recorded_actions, to_torch=True, check_if_null=True)
-            camera, buttons = recorded_actions_to_torch(recorded_actions)
-
-
-            # print("=== Predicting actions ===")
-            pi_distribution = agent.predict_actions_training(frames)
-            #print("pi_distribution",pi_distribution)
-            pi_camera=pi_distribution["camera"][0]
-            pi_buttons=pi_distribution["buttons"][0]
-            
-           # print("pi_distribution: \n",pi_distribution)
-            
-            if verbose and batch == 0:
-                print("pi_distribution",pi_distribution)
-                print("pi_distribution camera shape",pi_distribution["camera"].shape)
-                print("pi_distribution buttons shape",pi_distribution["buttons"].shape)
-                print("\n\nrecorded_actions",recorded_actions)
-                print("\n\ncamera",camera)
-                print("\n\nbuttons",buttons)
-                print("\n\ncamera shape",camera.shape)
-                print("\n\nbuttons shape",buttons.shape)
-                
-                
-            loss = 0
-            #for i in range(n_frames):
-               #try:
-                    #log_prob  = policy.get_logprob_of_action(pi_distribution, agent_action)
-                    #buttons_loss = loss_func(pi_buttons, buttons.to(device))
-                    #camera_loss = loss_func(pi_camera, camera.to(device))
-                #except:
-                #    print("ERROR 3")
-                #    print("pi_camera",pi_camera)
-                #    print("camera",camera)
-                #    print("camera_loss",camera_loss)
-                #    
-                #    print("pi_buttons",pi_buttons)
-                #    print("buttons",buttons)
-                #    print("buttons_loss",buttons_loss)
-            
-            try:
-                buttons_loss = loss_func(pi_buttons.reshape(n_frames*20,2),buttons.to(device).reshape(n_frames*20))
-                camera_loss = loss_func(pi_camera.reshape(n_frames*2,11),camera.to(device).reshape(n_frames*2))
-                loss = (camera_loss + buttons_loss)*n_frames
-            except:
-                print("ERROR 3")
-                print("pi_camera",pi_camera)
-                print("camera",camera)
-                print("camera_loss",camera_loss)
-                
-                print("pi_buttons",pi_buttons)
-                print("buttons",buttons)
-                print("buttons_loss",buttons_loss)
-                
-            if verbose and i == 0 and batch % accumulation == 0:
-                print("pi_camera",pi_camera)
-                print("camera",camera)
-                print("camera_loss",camera_loss)
-                
-                print("pi_buttons",pi_buttons)
-                print("buttons",buttons)
-                print("buttons_loss",buttons_loss)
-         #   print("Step:",step,end=" - ")
-            batch_loss += loss.item()
-
-            # print("Total loss",loss.item())
-            loss.backward()
-            agent.reset()
-            #th.nn.utils.clip_grad_norm_(trainable_parameters, MAX_GRAD_NORM) #Applies gradient clipping
-        #if (step+1) % accumulation == 0:
-        logoutput = f"Optimizer step: {str(batch)}, Avrg loss: {str(batch_loss/accumulation)}"
-        log.write(logoutput + '\n') # write to file
-        print(logoutput)
-
-        optimizer.step()
-        optimizer.zero_grad()
-        batch=batch+1            
-        if batch % BACKUP == 0:
-            state_dict = agent.policy.state_dict()
-            th.save(state_dict, out_weights)
-            logoutput = "Model backed up"
-            log.write(logoutput + '\n') # write to file
-            print(logoutput)
-    
-    if out_weights:
-        state_dict = agent.policy.state_dict()
-        th.save(state_dict, out_weights)
-        print("Model saved")
-
 
 def json_action_to_env_action(json_action):
     """
@@ -523,22 +381,146 @@ class Data_Loader():
         
                 
 
+    
+def main(model, weights, video_path, json_path, n_batches, n_frames, accumulation, out_weights, device, n_workers, n_epochs,verbose=False):
+    print(MESSAGE)
+    if model == "":
+        agent_parameters = agent_settings
+    else:
+        agent_parameters = pickle.load(open(model, "rb"))
+    net_kwargs = agent_parameters["model"]["args"]["net"]["args"]
+    pi_head_kwargs = agent_parameters["model"]["args"]["pi_head_opts"]
+    pi_head_kwargs["temperature"] = float(pi_head_kwargs["temperature"])
+    agent = IDMAgent(idm_net_kwargs=net_kwargs, pi_head_kwargs=pi_head_kwargs,device = device)
+   # with open('CorIDM.model', 'wb') as f:
+    #    pickle.dump(agent_parameters, f)
+    #th.save(agent_parameters, out_weights + ".model")
+    if weights != "":
+        agent.load_weights(weights)
         
+    print("video path",video_path)
+    if ".mp4" in video_path:
+        demonstration_tuples = [(video_path, json_path)]
+        
+    else:
+        demonstration_tuples = load_data_path(video_path, n_epochs)
+        print("Number of clips:",len(demonstration_tuples))
+    required_resolution = ENV_KWARGS["resolution"]
+
+        
+        
+        
+        
+    #""" Defining training objects """
+    #LEARNING_RATE = 0.003
+    #WEIGHT_DECAY = 0.01
+    #MAX_GRAD_NORM = 5.0
+    
+    trainable_parameters = agent.policy.parameters()
+    
+    optimizer = th.optim.Adam(
+    trainable_parameters,
+    lr=LEARNING_RATE,
+    weight_decay=WEIGHT_DECAY
+    )
+    
+    
+    data_loader = Data_Loader(demonstration_tuples,required_resolution=required_resolution, n_epochs=n_epochs, n_workers=n_workers, n_frames=n_frames)
+    
+    loss_func = th.nn.CrossEntropyLoss()
+    step = 0
+    
+
+    while True:
+        step=step+1
+        
+        frames, recorded_actions, worker_num = data_loader.next()
+
+        if type(frames) == type(None):
+            break
+        th.cuda.empty_cache()
+        
+
+        # print("=== Predicting actions ===")
+        pi_distribution = agent.predict_actions_training(frames)
+        
+        pi_camera=pi_distribution["camera"][0]
+        pi_buttons=pi_distribution["buttons"][0]
+
+
+        camera, buttons = recorded_actions_to_torch(recorded_actions)
+        if verbose and step == 0:
+            print("pi_distribution",pi_distribution)
+            print("pi_distribution camera shape",pi_distribution["camera"].shape)
+            print("pi_distribution buttons shape",pi_distribution["buttons"].shape)
+            print("\n\nrecorded_actions",recorded_actions)
+            print("\n\ncamera",camera)
+            print("\n\nbuttons",buttons)
+            print("\n\ncamera shape",camera.shape)
+            print("\n\nbuttons shape",buttons.shape)
+            
+            
+        loss = 0
+        for i in range(n_frames):
+            try:
+                camera_loss = loss_func(pi_camera[i], camera[i].to(device))
+                buttons_loss = loss_func(pi_buttons[i], buttons[i].to(device))*10
+                loss = loss + camera_loss + buttons_loss
+            except:
+                print("ERROR 3")
+                print("pi_camera[i]",pi_camera[i])
+                print("camera[i]",camera[i])
+                print("camera_loss",camera_loss)
+                
+                print("pi_buttons[i]",pi_buttons[i])
+                print("buttons[i]",buttons[i])
+                print("buttons_loss",buttons_loss)
+            
+            if verbose and i == 0 and step % accumulation == 0:
+                print("pi_camera[i]",pi_camera[i])
+                print("camera[i]",camera[i])
+                print("camera_loss",camera_loss)
+                
+                print("pi_buttons[i]",pi_buttons[i])
+                print("buttons[i]",buttons[i])
+                print("buttons_loss",buttons_loss)
+        print("Step:",step,end=" - ")
+        print("Total loss",loss.item()/n_frames)
+        loss.backward()
+        agent.reset()
+        #th.nn.utils.clip_grad_norm_(trainable_parameters, MAX_GRAD_NORM) #Applies gradient clipping
+        if (step+1) % accumulation == 0:
+            print("Optimizer step")
+            optimizer.step()
+            optimizer.zero_grad()
+                
+        if (step+1) % BACKUP == 0:
+            state_dict = agent.policy.state_dict()
+            th.save(state_dict, out_weights)
+            print("Model backed up")
+                
+    if out_weights:
+        state_dict = agent.policy.state_dict()
+        th.save(state_dict, out_weights)
+        print("Model saved")
+
 
 if __name__ == "__main__":
     parser = ArgumentParser("Run IDM on MineRL recordings.")
 
     parser.add_argument("--weights", type=str, default="", required=False, help="Path to the '.weights' file to be loaded.")
     parser.add_argument("--model", type=str, default="", required=False, help="Path to the '.model' file to be loaded.")
-    parser.add_argument("--video-path", type=str, required=True, help="Path to a folder of demonstrations")
+    parser.add_argument("--video-path", type=str, required=True, help="Path to a .mp4 file (Minecraft recording).")
+    parser.add_argument("--jsonl-path", type=str, default=None, required=False, help="Path to a .jsonl file (Minecraft recording).")
     parser.add_argument("--n-frames", type=int, default=16, help="Number of frames to process at a time.")
-    parser.add_argument("--n_epochs", type=int, default=5, help="Number of epochs to run for.")
-    parser.add_argument("--batch-accumulaton", type=int, default=32, help="Number of batches to process before optimizer step.")
+    parser.add_argument("--n-batches", type=int, default=10, help="Number of batches (n-frames) to process for visualization.")
+    parser.add_argument("--n_epochs", type=int, default=3, help="Number of epochs to run for.")
+    parser.add_argument("--batch-accumulaton", type=int, default=16, help="Number of batches to process before optimizer step.")
     parser.add_argument("--out_weights",  default="", type=str,help="Name to save weights as")
     parser.add_argument("--device",  default="cuda", type=str,help="Specify either cpu or cuda")
-    parser.add_argument("--n_workers",  default=48, type=int,help="Number of clips to train on in parallel")
+    parser.add_argument("--n_workers",  default=5, type=int,help="Number of clips to train on in parallel")
     parser.add_argument("--verbose",  default=False, type=str,help="False by default, pass string to output extra info about tensors during training.")
 
     args = parser.parse_args()
 
-    main(args.model, args.weights, args.video_path, args.n_frames, args.batch_accumulaton, args.out_weights, args.device,args.n_workers, args.n_epochs, verbose=args.verbose)
+    main(args.model, args.weights, args.video_path, args.jsonl_path, args.n_batches, args.n_frames, args.batch_accumulaton, args.out_weights, args.device,args.n_workers, args.n_epochs, verbose=args.verbose)
