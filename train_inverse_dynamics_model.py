@@ -124,7 +124,7 @@ CURSOR_FILE = os.path.join(os.path.dirname(__file__), "cursors", "mouse_cursor_w
 # This is for mapping from recorded sensitivity to the one used in the model
 CAMERA_SCALER = 0.5 * 360.0 / 2400.0 # Needs calibration for sure
 
-BACKUP = 10000
+BACKUP = 250
 
 def composite_images_with_alpha(image1, image2, alpha, x, y):
     """
@@ -132,8 +132,8 @@ def composite_images_with_alpha(image1, image2, alpha, x, y):
 
     Modifies image1 in-place
     """
-    ch = max(0, min(image1.shape[0] - y, image2.shape[0]))
-    cw = max(0, min(image1.shape[1] - x, image2.shape[1]))
+    ch = min(image1.shape[0] - y, image2.shape[0])
+    cw = min(image1.shape[1] - x, image2.shape[1])
     if ch == 0 or cw == 0:
         return
     alpha = alpha[:ch, :cw]
@@ -143,14 +143,14 @@ def composite_images_with_alpha(image1, image2, alpha, x, y):
 
 agent_settings = {'version': 1361,
                   'model': {'args': {
-                      'net': {'args': {'attention_heads': 16, 
+                      'net': {'args': {'attention_heads': 8, 
                                        'attention_mask_style': 'none',
                                        'attention_memory_size': 16,
                                        'conv3d_params': {'inchan': 3, 'kernel_size': [5, 1, 1], 'outchan': 16, 'padding': [2, 0, 0]},
                                        'hidsize': 1024,
                                        'img_shape': [128, 128, 16],
                                        'impala_kwargs': {'post_pool_groups': 1},
-                                       'impala_width': 8,
+                                       'impala_width': 4,
                                        'init_norm_kwargs': {'batch_norm': False, 'group_norm_groups': 1},
                                        'n_recurrence_layers': 2,
                                        'only_img_input': True,
@@ -308,7 +308,7 @@ class Data_Loader():
                 except:
                     print("Failed: " + video_tuple[1])
                     continue
-            rnd = random.randrange(63)
+            rnd = random.randrange(14)
             # print(str(rnd))
             for _ in range(rnd):
                 ret, frame = cap.read()
@@ -429,76 +429,81 @@ def main(model, weights, video_path, json_path, n_batches, n_frames, accumulatio
     
     loss_func = th.nn.CrossEntropyLoss()
     step = 0
+    batch_loss = 0
     
 
     while True:
+        for _ in range(accumulation):
+
+            frames, recorded_actions, worker_num = data_loader.next()
+
+            if type(frames) == type(None):
+                break
+            th.cuda.empty_cache()
+            
+
+            # print("=== Predicting actions ===")
+            pi_distribution = agent.predict_actions_training(frames)
+            
+            pi_camera=pi_distribution["camera"][0]
+            pi_buttons=pi_distribution["buttons"][0]
+
+
+            camera, buttons = recorded_actions_to_torch(recorded_actions)
+            if verbose and step == 0:
+                print("pi_distribution",pi_distribution)
+                print("pi_distribution camera shape",pi_distribution["camera"].shape)
+                print("pi_distribution buttons shape",pi_distribution["buttons"].shape)
+                print("\n\nrecorded_actions",recorded_actions)
+                print("\n\ncamera",camera)
+                print("\n\nbuttons",buttons)
+                print("\n\ncamera shape",camera.shape)
+                print("\n\nbuttons shape",buttons.shape)
+                
+                
+            loss = 0
+            for i in range(n_frames):
+                try:
+                    camera_loss = loss_func(pi_camera[i], camera[i].to(device))
+                    buttons_loss = loss_func(pi_buttons[i], buttons[i].to(device))*10
+                    loss = loss + camera_loss + buttons_loss
+                except:
+                    print("ERROR 3")
+                    print("pi_camera[i]",pi_camera[i])
+                    print("camera[i]",camera[i])
+                    print("camera_loss",camera_loss)
+                    
+                    print("pi_buttons[i]",pi_buttons[i])
+                    print("buttons[i]",buttons[i])
+                    print("buttons_loss",buttons_loss)
+                
+                if verbose and i == 0 and step % accumulation == 0:
+                    print("pi_camera[i]",pi_camera[i])
+                    print("camera[i]",camera[i])
+                    print("camera_loss",camera_loss)
+                    
+                    print("pi_buttons[i]",pi_buttons[i])
+                    print("buttons[i]",buttons[i])
+                    print("buttons_loss",buttons_loss)
+           # print("Step:",step,end=" - ")
+           # print("Total loss",loss.item()/n_frames)
+            batch_loss += loss.item()/n_frames
+
+            loss.backward()
+            agent.reset()
+            #th.nn.utils.clip_grad_norm_(trainable_parameters, MAX_GRAD_NORM) #Applies gradient clipping
+            
+        print(f"Optimizer step {step+1}, Batch loss = {str(batch_loss/accumulation)}")
+        optimizer.step()
+        optimizer.zero_grad()
         step=step+1
-        
-        frames, recorded_actions, worker_num = data_loader.next()
-
-        if type(frames) == type(None):
-            break
-        th.cuda.empty_cache()
-        
-
-        # print("=== Predicting actions ===")
-        pi_distribution = agent.predict_actions_training(frames)
-        
-        pi_camera=pi_distribution["camera"][0]
-        pi_buttons=pi_distribution["buttons"][0]
-
-
-        camera, buttons = recorded_actions_to_torch(recorded_actions)
-        if verbose and step == 0:
-            print("pi_distribution",pi_distribution)
-            print("pi_distribution camera shape",pi_distribution["camera"].shape)
-            print("pi_distribution buttons shape",pi_distribution["buttons"].shape)
-            print("\n\nrecorded_actions",recorded_actions)
-            print("\n\ncamera",camera)
-            print("\n\nbuttons",buttons)
-            print("\n\ncamera shape",camera.shape)
-            print("\n\nbuttons shape",buttons.shape)
-            
-            
-        loss = 0
-        for i in range(n_frames):
-            try:
-                camera_loss = loss_func(pi_camera[i], camera[i].to(device))
-                buttons_loss = loss_func(pi_buttons[i], buttons[i].to(device))*10
-                loss = loss + camera_loss + buttons_loss
-            except:
-                print("ERROR 3")
-                print("pi_camera[i]",pi_camera[i])
-                print("camera[i]",camera[i])
-                print("camera_loss",camera_loss)
-                
-                print("pi_buttons[i]",pi_buttons[i])
-                print("buttons[i]",buttons[i])
-                print("buttons_loss",buttons_loss)
-            
-            if verbose and i == 0 and step % accumulation == 0:
-                print("pi_camera[i]",pi_camera[i])
-                print("camera[i]",camera[i])
-                print("camera_loss",camera_loss)
-                
-                print("pi_buttons[i]",pi_buttons[i])
-                print("buttons[i]",buttons[i])
-                print("buttons_loss",buttons_loss)
-        print("Step:",step,end=" - ")
-        print("Total loss",loss.item()/n_frames)
-        loss.backward()
-        agent.reset()
-        #th.nn.utils.clip_grad_norm_(trainable_parameters, MAX_GRAD_NORM) #Applies gradient clipping
-        if (step+1) % accumulation == 0:
-            print("Optimizer step")
-            optimizer.step()
-            optimizer.zero_grad()
+        batch_loss = 0
                 
         if (step+1) % BACKUP == 0:
             state_dict = agent.policy.state_dict()
             th.save(state_dict, out_weights)
             print("Model backed up")
-                
+                    
     if out_weights:
         state_dict = agent.policy.state_dict()
         th.save(state_dict, out_weights)
